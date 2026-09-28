@@ -1,218 +1,176 @@
 # /// script
 # requires-python = ">=3.10"
-# dependencies = ["matplotlib"]
+# dependencies = ["matplotlib", "numpy"]
 # ///
 
 import csv
 from pathlib import Path
 from datetime import datetime
 
+import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
 from matplotlib.colors import LinearSegmentedColormap
-import matplotlib.dates as mdates
 
 
 ROOT = Path(__file__).parent
 DATA_FILE = ROOT / "data" / "Sun_rise_set_2026.csv"
-OUTPUT_FILE = ROOT / "out" / "04-light-barcode-poster.png"
+OUTPUT_FILE = ROOT / "out" / "08-wide-year-of-light.png"
 
 
-def time_to_hours(time_string: str) -> float:
-    """Convert HH:MM to decimal hours."""
+def time_to_hours(time_string):
+    """Convert a time such as 07:03 into decimal hours."""
     hour, minute = map(int, time_string.split(":"))
     return hour + minute / 60
 
 
-def hours_to_label(hours_float: float) -> str:
-    """Convert decimal hours to 'Hh Mm'."""
-    h = int(hours_float)
-    m = int(round((hours_float - h) * 60))
-    if m == 60:
-        h += 1
-        m = 0
-    return f"{h} h {m:02d} m"
-
-
-def load_data():
+def load_data(path):
     dates = []
     sunrise = []
     sunset = []
-    daylight = []
 
-    with open(DATA_FILE, encoding="utf-8-sig") as file:
+    with path.open(encoding="utf-8-sig", newline="") as file:
         reader = csv.DictReader(file)
+
         for row in reader:
-            d = datetime.strptime(row["YYYY-MM-DD"], "%Y-%m-%d")
-            rise = time_to_hours(row["RISE"])
-            sett = time_to_hours(row["SET"])
-            light = sett - rise
+            dates.append(datetime.strptime(row["YYYY-MM-DD"], "%Y-%m-%d"))
+            sunrise.append(time_to_hours(row["RISE"]))
+            sunset.append(time_to_hours(row["SET"]))
 
-            dates.append(d)
-            sunrise.append(rise)
-            sunset.append(sett)
-            daylight.append(light)
-
-    return dates, sunrise, sunset, daylight
+    return dates, np.array(sunrise), np.array(sunset)
 
 
-def build_segments(dates, sunrise, sunset):
-    """Build vertical line segments for LineCollection."""
-    x = mdates.date2num(dates)
-    segments = []
+def get_month_positions(dates):
+    positions = []
+    labels = []
 
-    for xi, y1, y2 in zip(x, sunrise, sunset):
-        segments.append([(xi, y1), (xi, y2)])
+    for i, date in enumerate(dates):
+        if date.day == 1:
+            positions.append(i)
+            labels.append(date.strftime("%b").upper())
 
-    return segments
-
-
-def find_stats(dates, sunrise, sunset, daylight):
-    longest_i = daylight.index(max(daylight))
-    shortest_i = daylight.index(min(daylight))
-    earliest_i = sunrise.index(min(sunrise))
-    latest_i = sunset.index(max(sunset))
-
-    return {
-        "longest_day": (dates[longest_i], daylight[longest_i]),
-        "shortest_day": (dates[shortest_i], daylight[shortest_i]),
-        "earliest_sunrise": (dates[earliest_i], sunrise[earliest_i]),
-        "latest_sunset": (dates[latest_i], sunset[latest_i]),
-    }
+    return positions, labels
 
 
 def main():
-    dates, sunrise, sunset, daylight = load_data()
-    stats = find_stats(dates, sunrise, sunset, daylight)
+    dates, sunrise, sunset = load_data(DATA_FILE)
+    daylight = sunset - sunrise
+    x = np.arange(len(dates))
 
-    # ---- style ----
-    bg = "#f5f1e8"
-    text_main = "#1f1f1f"
-    text_sub = "#66625c"
-    grid = "#d8d2c8"
+    # -----------------------------
+    # style
+    # -----------------------------
+    background = "#F6F2EA"   # warm off-white
+    text = "#2E2A26"
+    secondary = "#7C746B"
+    grid = "#DDD6CB"
 
-    # warm light palette
+    # 柔和暖色，不要太炸
     cmap = LinearSegmentedColormap.from_list(
-        "sunlight",
-        ["#d94b3d", "#f08a4b", "#f5c35b", "#f8df7a", "#f08a4b", "#d94b3d"]
+        "soft_sunlight",
+        [
+            "#E98A6B",  # soft coral
+            "#F1AE62",  # warm orange
+            "#F3D685",  # pale yellow
+            "#F0B071",  # peach
+        ]
     )
 
-    # normalize color by daylight length
-    d_min = min(daylight)
-    d_max = max(daylight)
-    norm = [(d - d_min) / (d_max - d_min) if d_max > d_min else 0.5 for d in daylight]
+    d_min = daylight.min()
+    d_max = daylight.max()
+    norm = (daylight - d_min) / (d_max - d_min)
     colors = [cmap(v) for v in norm]
 
-    # ---- figure ----
-    fig = plt.figure(figsize=(8, 11), facecolor=bg)
+    # -----------------------------
+    # figure
+    # -----------------------------
+    fig = plt.figure(figsize=(18, 7), facecolor=background)
+    ax = fig.add_axes([0.06, 0.20, 0.91, 0.60], facecolor=background)
 
-    # main barcode chart
-    ax = fig.add_axes([0.08, 0.23, 0.84, 0.56], facecolor=bg)
+    # month guides
+    month_positions, month_labels = get_month_positions(dates)
+    for pos in month_positions:
+        ax.axvline(pos - 0.5, color=grid, linewidth=0.7, alpha=0.45, zorder=0)
 
-    segments = build_segments(dates, sunrise, sunset)
-    lc = LineCollection(segments, colors=colors, linewidths=1.2, alpha=0.95)
-    ax.add_collection(lc)
+    # main visual: one line per day
+    ax.vlines(
+        x,
+        sunrise,
+        sunset,
+        colors=colors,
+        linewidth=1.15,
+        alpha=0.95,
+        zorder=2
+    )
 
-    # axes limits
-    ax.set_xlim(mdates.date2num(dates[0]), mdates.date2num(dates[-1]))
-    ax.set_ylim(19.5, 5.0)  # inverted so early time is at top
+    # -----------------------------
+    # axes formatting
+    # -----------------------------
+    ax.set_xlim(-2, len(dates) + 1)
+    ax.set_ylim(19.6, 4.8)
 
-    # month labels
-    month_starts = [datetime(2026, m, 1) for m in range(1, 13)]
-    month_labels = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN",
-                    "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
+    ax.set_xticks(month_positions)
+    ax.set_xticklabels(month_labels, fontsize=11, color=secondary)
 
-    ax.set_xticks([mdates.date2num(d) for d in month_starts])
-    ax.set_xticklabels(month_labels, fontsize=9, color=text_sub)
+    ax.set_yticks([5, 7, 9, 12, 15, 17, 19])
+    ax.set_yticklabels(
+        ["05:00", "07:00", "09:00", "12:00", "15:00", "17:00", "19:00"],
+        fontsize=10,
+        color=secondary
+    )
 
-    # time labels
-    ax.set_yticks([5, 8, 11, 14, 17, 19.5])
-    ax.set_yticklabels(["05:00", "08:00", "11:00", "14:00", "17:00", "19:30"],
-                       fontsize=9, color=text_sub)
+    ax.grid(axis="y", color=grid, linewidth=0.7, alpha=0.18)
 
-    # grid
-    ax.grid(axis="x", color=grid, linewidth=0.8, linestyle=":", alpha=0.8)
-    ax.grid(axis="y", color=grid, linewidth=0.6, linestyle=":", alpha=0.3)
-
-    # remove spines/ticks
     for spine in ax.spines.values():
         spine.set_visible(False)
-    ax.tick_params(axis="both", length=0)
 
-    # ---- title ----
-    fig.text(0.08, 0.93, "HONG KONG", fontsize=26, weight="bold", color=text_main)
-    fig.text(0.08, 0.905, "SUNRISE / SUNSET", fontsize=26, weight="bold", color=text_main)
-    fig.text(0.08, 0.865, "365 DAYS OF LIGHT · 2026", fontsize=14, color=text_main)
+    ax.tick_params(axis="both", length=0, pad=8)
 
+    # -----------------------------
+    # title / minimal text
+    # -----------------------------
     fig.text(
-        0.92, 0.93,
-        "SAME CITY\nDIFFERENT SKIES\n365 SUNRISES\n365 SUNSETS",
-        fontsize=8, color=text_sub, ha="right", va="top", linespacing=1.8
+        0.06, 0.90,
+        "HONG KONG SUNRISE / SUNSET",
+        fontsize=26,
+        fontweight="bold",
+        color=text
     )
 
-    # ---- short description ----
     fig.text(
-        0.08, 0.84,
-        "Each vertical stroke marks one day.\n"
-        "Top edge = sunrise, bottom edge = sunset, height = daylight duration.",
-        fontsize=9, color=text_sub, linespacing=1.5
+        0.06, 0.855,
+        "365 days of daylight across 2026",
+        fontsize=12,
+        color=secondary
     )
 
-    # ---- stats row ----
-    x_positions = [0.10, 0.33, 0.56, 0.79]
-    labels = ["LONGEST DAY", "SHORTEST DAY", "EARLIEST SUNRISE", "LATEST SUNSET"]
+    fig.text(
+        0.97, 0.90,
+        "2026",
+        ha="right",
+        fontsize=20,
+        fontweight="bold",
+        color="#D98E6C"
+    )
 
-    values = [
-        (
-            stats["longest_day"][0].strftime("%d %b").upper(),
-            hours_to_label(stats["longest_day"][1]),
-        ),
-        (
-            stats["shortest_day"][0].strftime("%d %b").upper(),
-            hours_to_label(stats["shortest_day"][1]),
-        ),
-        (
-            stats["earliest_sunrise"][0].strftime("%d %b").upper(),
-            f"{int(stats['earliest_sunrise'][1]):02d}:{int(round((stats['earliest_sunrise'][1] % 1) * 60)):02d}",
-        ),
-        (
-            stats["latest_sunset"][0].strftime("%d %b").upper(),
-            f"{int(stats['latest_sunset'][1]):02d}:{int(round((stats['latest_sunset'][1] % 1) * 60)):02d}",
-        ),
-    ]
+    fig.text(
+        0.97, 0.08,
+        "Source: Hong Kong Observatory",
+        ha="right",
+        fontsize=8,
+        color=secondary
+    )
 
-    for x, label, (date_text, value_text) in zip(x_positions, labels, values):
-        fig.text(x, 0.155, label, fontsize=8, color=text_sub, weight="bold")
-        fig.text(x, 0.128, date_text, fontsize=16, color=text_main, weight="bold")
-        fig.text(x, 0.098, value_text, fontsize=12, color=text_main)
-
-    # ---- small daylight curve at bottom ----
-    ax2 = fig.add_axes([0.08, 0.05, 0.84, 0.07], facecolor=bg)
-    ax2.plot(dates, daylight, color="#e67c52", linewidth=1.5)
-    ax2.fill_between(dates, daylight, [min(daylight)] * len(daylight),
-                     color="#f1c27d", alpha=0.28)
-
-    ax2.set_xlim(dates[0], dates[-1])
-    ax2.set_ylim(min(daylight) - 0.2, max(daylight) + 0.2)
-
-    for spine in ["top", "right", "left"]:
-        ax2.spines[spine].set_visible(False)
-    ax2.spines["bottom"].set_color(grid)
-
-    ax2.tick_params(axis="y", left=False, labelleft=False)
-    ax2.tick_params(axis="x", colors=text_sub, labelsize=7)
-    ax2.xaxis.set_major_locator(mdates.MonthLocator(interval=2))
-    ax2.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
-
-    ax2.set_title("DAYLIGHT LENGTH THROUGH THE YEAR", loc="left",
-                  fontsize=8, color=text_sub, pad=6, weight="bold")
-
-    # ---- source ----
-    fig.text(0.92, 0.03, "Source: Hong Kong Observatory",
-             fontsize=7, color=text_sub, ha="right")
-
+    # -----------------------------
+    # save
+    # -----------------------------
     OUTPUT_FILE.parent.mkdir(exist_ok=True)
-    plt.savefig(OUTPUT_FILE, dpi=300, facecolor=bg, bbox_inches="tight")
+
+    plt.savefig(
+        OUTPUT_FILE,
+        dpi=250,
+        facecolor=fig.get_facecolor(),
+        bbox_inches="tight"
+    )
     plt.show()
 
 
