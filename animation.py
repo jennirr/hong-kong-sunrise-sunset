@@ -8,249 +8,532 @@ from pathlib import Path
 from datetime import datetime
 
 import matplotlib.pyplot as plt
-from matplotlib.collections import LineCollection
 from matplotlib.animation import FuncAnimation, PillowWriter
+from matplotlib.collections import LineCollection
+from matplotlib.colors import LinearSegmentedColormap
 
+
+# --------------------------------------------------
+# PATHS
+# --------------------------------------------------
 
 ROOT = Path(__file__).parent
 DATA_FILE = ROOT / "data" / "Sun_rise_set_2026.csv"
-OUTPUT_FILE = ROOT / "out" / "06-year-of-light-animation.gif"
-
-# ---------- style ----------
-BG = "#f5f1e8"
-GRID = "#d9d2c7"
-TEXT = "#2e2a26"
-TEXT_LIGHT = "#7f776d"
-ACCENT = "#d48c69"
-
-TITLE = "HONG KONG SUNRISE / SUNSET"
-SUBTITLE = "365 days of daylight across 2026"
-YEAR_LABEL = "2026"
-SOURCE = "Source: Hong Kong Observatory"
-
-FIG_W = 16
-FIG_H = 6
-FPS = 20
-INTERVAL = 40  # ms per frame
-SEGMENTS_PER_DAY = 60
+OUTPUT_FILE = ROOT / "out" / "07-year-of-light-animation.gif"
 
 
-def time_to_hours(time_string: str) -> float:
+# --------------------------------------------------
+# VISUAL SETTINGS
+# --------------------------------------------------
+
+BACKGROUND = "#F5F1E8"
+TEXT = "#2D2926"
+SECONDARY = "#817A72"
+GRID = "#DCD5C9"
+
+# Background lines
+BASE_ALPHA = 0.42
+BASE_WIDTH = 1.0
+
+# Current day
+HIGHLIGHT_ALPHA = 1.0
+HIGHLIGHT_WIDTH = 3.0
+
+# Each day is divided into this many colour sections.
+# 24 is enough for a smooth-looking gradient but much faster than 60.
+SEGMENTS_PER_DAY = 24
+
+FPS = 18
+
+
+# --------------------------------------------------
+# DATA
+# --------------------------------------------------
+
+def time_to_hours(time_string):
+    """Convert 07:03 to decimal hours."""
     hour, minute = map(int, time_string.split(":"))
     return hour + minute / 60
 
 
-def hours_to_hm(hours: float) -> str:
-    h = int(hours)
-    m = int(round((hours - h) * 60))
-    if m == 60:
-        h += 1
-        m = 0
-    return f"{h:02d}:{m:02d}"
+def format_time(hours):
+    """Convert decimal hours back to HH:MM."""
+    total_minutes = round(hours * 60)
+
+    hour = total_minutes // 60
+    minute = total_minutes % 60
+
+    return f"{hour:02d}:{minute:02d}"
 
 
-def daylight_text(hours: float) -> str:
-    h = int(hours)
-    m = int(round((hours - h) * 60))
-    if m == 60:
-        h += 1
-        m = 0
-    return f"{h}h {m:02d}m"
+def format_duration(hours):
+    """Convert decimal hours into 13h 30m."""
+    total_minutes = round(hours * 60)
+
+    hour = total_minutes // 60
+    minute = total_minutes % 60
+
+    return f"{hour}h {minute:02d}m"
 
 
-def lerp_color(c1, c2, t):
-    return tuple(c1[i] + (c2[i] - c1[i]) * t for i in range(3))
-
-
-def hex_to_rgb(hex_color):
-    hex_color = hex_color.lstrip("#")
-    return tuple(int(hex_color[i:i+2], 16) / 255 for i in (0, 2, 4))
-
-
-def rgb_to_rgba(rgb, a=1.0):
-    return (rgb[0], rgb[1], rgb[2], a)
-
-
-# soft sky palette: dawn -> morning -> noon -> afternoon -> dusk
-DAWN = hex_to_rgb("#efb1a2")       # soft pink
-MORNING = hex_to_rgb("#f6d58b")    # pale warm yellow
-NOON = hex_to_rgb("#fbf7ef")       # almost white
-AFTERNOON = hex_to_rgb("#f8ddb0")  # warm cream
-DUSK = hex_to_rgb("#efb1a2")       # pink again
-
-
-def sky_color(progress: float):
-    """
-    progress: 0..1 within one day's daylight
-    """
-    if progress < 0.25:
-        t = progress / 0.25
-        rgb = lerp_color(DAWN, MORNING, t)
-    elif progress < 0.5:
-        t = (progress - 0.25) / 0.25
-        rgb = lerp_color(MORNING, NOON, t)
-    elif progress < 0.75:
-        t = (progress - 0.5) / 0.25
-        rgb = lerp_color(NOON, AFTERNOON, t)
-    else:
-        t = (progress - 0.75) / 0.25
-        rgb = lerp_color(AFTERNOON, DUSK, t)
-    return rgb
-
-
-def load_data():
+def load_data(path):
     dates = []
     sunrise = []
     sunset = []
 
-    with DATA_FILE.open(encoding="utf-8-sig") as file:
+    with path.open(encoding="utf-8-sig", newline="") as file:
         reader = csv.DictReader(file)
+
         for row in reader:
-            dates.append(datetime.strptime(row["YYYY-MM-DD"], "%Y-%m-%d"))
-            sunrise.append(time_to_hours(row["RISE"]))
-            sunset.append(time_to_hours(row["SET"]))
+            dates.append(
+                datetime.strptime(
+                    row["YYYY-MM-DD"],
+                    "%Y-%m-%d"
+                )
+            )
+
+            sunrise.append(
+                time_to_hours(row["RISE"])
+            )
+
+            sunset.append(
+                time_to_hours(row["SET"])
+            )
 
     return dates, sunrise, sunset
 
 
-def build_day_segments(x, y1, y2, alpha=0.45, width=1.1):
+# --------------------------------------------------
+# SKY COLOURS
+# --------------------------------------------------
+
+def build_sky_colormap():
     """
-    Make one vertical daylight bar using many short colored segments.
+    Artistic sky colours from sunrise to sunset.
+
+    These colours are not measured sky-colour data.
+    They visually suggest the changing atmosphere of daylight.
     """
-    segments = []
-    colors = []
-    ys = [y1 + (y2 - y1) * i / SEGMENTS_PER_DAY for i in range(SEGMENTS_PER_DAY + 1)]
 
-    for i in range(SEGMENTS_PER_DAY):
-        y_start = ys[i]
-        y_end = ys[i + 1]
-        p = i / (SEGMENTS_PER_DAY - 1)
-        color = rgb_to_rgba(sky_color(p), alpha)
+    colors = [
+        "#E6AAA5",  # dawn rose
+        "#EFC1A5",  # peach
+        "#F3D6AD",  # morning gold
+        "#EEE7D5",  # warm daylight
+        "#D8E2E4",  # soft pale blue
+        "#E4E1D1",  # afternoon haze
+        "#EEC5AA",  # late afternoon
+        "#DDA5A5",  # sunset rose
+    ]
 
-        segments.append([(x, y_start), (x, y_end)])
-        colors.append(color)
-
-    return LineCollection(
-        segments,
-        colors=colors,
-        linewidths=width,
-        capstyle="butt",
-        zorder=3
+    return LinearSegmentedColormap.from_list(
+        "sky",
+        colors
     )
 
 
-def build_background(ax, dates, sunrise, sunset):
-    for i, (sr, ss) in enumerate(zip(sunrise, sunset)):
-        lc = build_day_segments(i, sr, ss, alpha=0.45, width=1.1)
-        ax.add_collection(lc)
+SKY_CMAP = build_sky_colormap()
 
 
-def add_labels(fig, ax, dates, sunrise, sunset):
-    # Title block
-    fig.text(0.055, 0.92, TITLE, fontsize=30, fontweight="bold", color=TEXT)
-    fig.text(0.055, 0.875, SUBTITLE, fontsize=15, color=TEXT_LIGHT)
-    fig.text(0.93, 0.91, YEAR_LABEL, ha="right", fontsize=24, fontweight="bold", color=ACCENT)
+# --------------------------------------------------
+# BUILD ONE DAY
+# --------------------------------------------------
 
-    # Source
-    fig.text(0.93, 0.06, SOURCE, ha="right", fontsize=10, color=TEXT_LIGHT)
+def day_segments(x, sunrise, sunset):
+    """
+    Return segments and colours for one vertical day.
+    """
 
-    # Month ticks
+    segments = []
+    colors = []
+
+    for i in range(SEGMENTS_PER_DAY):
+
+        progress_1 = i / SEGMENTS_PER_DAY
+        progress_2 = (i + 1) / SEGMENTS_PER_DAY
+
+        y1 = sunrise + (sunset - sunrise) * progress_1
+        y2 = sunrise + (sunset - sunrise) * progress_2
+
+        segments.append(
+            [
+                (x, y1),
+                (x, y2)
+            ]
+        )
+
+        middle = (
+            progress_1 + progress_2
+        ) / 2
+
+        colors.append(
+            SKY_CMAP(middle)
+        )
+
+    return segments, colors
+
+
+# --------------------------------------------------
+# BUILD ALL 365 DAYS ONCE
+# --------------------------------------------------
+
+def build_year_background(
+    dates,
+    sunrise,
+    sunset
+):
+
+    all_segments = []
+    all_colors = []
+
+    for i in range(len(dates)):
+
+        segments, colors = day_segments(
+            i,
+            sunrise[i],
+            sunset[i]
+        )
+
+        all_segments.extend(segments)
+        all_colors.extend(colors)
+
+    return all_segments, all_colors
+
+
+# --------------------------------------------------
+# MAIN
+# --------------------------------------------------
+
+def main():
+
+    dates, sunrise, sunset = load_data(
+        DATA_FILE
+    )
+
+    daylight = [
+        sunset[i] - sunrise[i]
+        for i in range(len(dates))
+    ]
+
+    # ----------------------------------------------
+    # FIGURE
+    # ----------------------------------------------
+
+    # Keep the wide composition,
+    # but GIF resolution is intentionally lighter.
+    fig = plt.figure(
+        figsize=(16, 5.2),
+        dpi=100,
+        facecolor=BACKGROUND
+    )
+
+    ax = fig.add_axes(
+        [0.045, 0.20, 0.925, 0.62],
+        facecolor=BACKGROUND
+    )
+
+    # ----------------------------------------------
+    # STATIC YEAR
+    # ----------------------------------------------
+
+    background_segments, background_colors = (
+        build_year_background(
+            dates,
+            sunrise,
+            sunset
+        )
+    )
+
+    background_collection = LineCollection(
+        background_segments,
+        colors=background_colors,
+        linewidths=BASE_WIDTH,
+        alpha=BASE_ALPHA,
+        capstyle="butt",
+        zorder=2
+    )
+
+    ax.add_collection(
+        background_collection
+    )
+
+    # ----------------------------------------------
+    # CURRENT-DAY HIGHLIGHT
+    # ----------------------------------------------
+
+    initial_segments, initial_colors = day_segments(
+        0,
+        sunrise[0],
+        sunset[0]
+    )
+
+    highlight = LineCollection(
+        initial_segments,
+        colors=initial_colors,
+        linewidths=HIGHLIGHT_WIDTH,
+        alpha=HIGHLIGHT_ALPHA,
+        capstyle="butt",
+        zorder=5
+    )
+
+    ax.add_collection(highlight)
+
+    # A very subtle vertical guide
+    guide = ax.axvline(
+        0,
+        color="#B8AEA3",
+        linewidth=0.7,
+        alpha=0.35,
+        zorder=1
+    )
+
+    # ----------------------------------------------
+    # AXES
+    # ----------------------------------------------
+
+    ax.set_xlim(
+        -3,
+        len(dates) + 2
+    )
+
+    ax.set_ylim(
+        19.5,
+        4.5
+    )
+
+    y_ticks = [
+        5,
+        7,
+        9,
+        12,
+        15,
+        17,
+        19
+    ]
+
+    ax.set_yticks(y_ticks)
+
+    ax.set_yticklabels(
+        [
+            f"{int(t):02d}:00"
+            for t in y_ticks
+        ],
+        fontsize=9,
+        color=SECONDARY
+    )
+
+    ax.tick_params(
+        axis="y",
+        length=0,
+        pad=8
+    )
+
+    # ----------------------------------------------
+    # MONTHS
+    # ----------------------------------------------
+
     month_positions = []
     month_labels = []
-    current_month = None
-    for i, d in enumerate(dates):
-        if d.month != current_month:
+
+    last_month = None
+
+    for i, date in enumerate(dates):
+
+        if date.month != last_month:
+
             month_positions.append(i)
-            month_labels.append(d.strftime("%b").upper())
-            current_month = d.month
+            month_labels.append(
+                date.strftime("%b").upper()
+            )
 
-    ax.set_xticks(month_positions)
-    ax.set_xticklabels(month_labels, fontsize=12, color=TEXT_LIGHT)
+            last_month = date.month
 
-    # Y ticks
-    yticks = [5, 7, 9, 12, 15, 17, 19]
-    ax.set_yticks(yticks)
-    ax.set_yticklabels([f"{int(y):02d}:00" for y in yticks], fontsize=12, color=TEXT_LIGHT)
+    ax.set_xticks(
+        month_positions
+    )
 
-    # grid
-    ax.grid(axis="x", color=GRID, linewidth=0.8, alpha=0.6)
-    ax.grid(axis="y", color=GRID, linewidth=0.8, alpha=0.35)
+    ax.set_xticklabels(
+        month_labels,
+        fontsize=9,
+        color=SECONDARY
+    )
 
-    # limits and style
-    ax.set_xlim(-5, len(dates) + 5)
-    ax.set_ylim(19.5, 4.5)  # invert so early morning is at top
+    ax.tick_params(
+        axis="x",
+        length=0,
+        pad=8
+    )
+
+    # ----------------------------------------------
+    # GRID
+    # ----------------------------------------------
+
+    for y in y_ticks:
+
+        ax.axhline(
+            y,
+            color=GRID,
+            linewidth=0.6,
+            alpha=0.25,
+            zorder=0
+        )
+
+    for x in month_positions:
+
+        ax.axvline(
+            x - 0.5,
+            color=GRID,
+            linewidth=0.6,
+            alpha=0.25,
+            zorder=0
+        )
 
     for spine in ax.spines.values():
         spine.set_visible(False)
 
-    ax.tick_params(length=0)
-    ax.set_facecolor(BG)
+    # ----------------------------------------------
+    # TITLE — SAME AS STATIC VERSION
+    # ----------------------------------------------
 
-
-def main():
-    dates, sunrise, sunset = load_data()
-    daylight = [ss - sr for sr, ss in zip(sunrise, sunset)]
-
-    OUTPUT_FILE.parent.mkdir(exist_ok=True)
-
-    fig = plt.figure(figsize=(FIG_W, FIG_H), facecolor=BG)
-    ax = fig.add_axes([0.05, 0.18, 0.92, 0.64])
-    ax.set_facecolor(BG)
-
-    # background: all days
-    build_background(ax, dates, sunrise, sunset)
-    add_labels(fig, ax, dates, sunrise, sunset)
-
-    # animated highlight
-    highlight = build_day_segments(0, sunrise[0], sunset[0], alpha=0.95, width=3.0)
-    ax.add_collection(highlight)
-
-    # current-day text
-    info_text = fig.text(
-        0.055, 0.085,
-        "",
-        fontsize=12,
-        color=TEXT_LIGHT
+    fig.text(
+        0.045,
+        0.91,
+        "A YEAR OF LIGHT",
+        fontsize=24,
+        fontweight="bold",
+        color=TEXT,
+        ha="left"
     )
 
-    # optional subtle guide line at current day
-    current_line = ax.axvline(0, color="#c8b8a7", linewidth=0.8, alpha=0.35, zorder=1)
+    fig.text(
+        0.045,
+        0.86,
+        "Hong Kong sunrise and sunset · 2026",
+        fontsize=11,
+        color=SECONDARY,
+        ha="left"
+    )
+
+    # ----------------------------------------------
+    # CURRENT DAY INFORMATION
+    # ----------------------------------------------
+
+    info_text = fig.text(
+        0.045,
+        0.085,
+        "",
+        fontsize=10,
+        color=TEXT,
+        ha="left"
+    )
+
+    fig.text(
+        0.97,
+        0.065,
+        "Source · Hong Kong Observatory",
+        fontsize=8,
+        color=SECONDARY,
+        ha="right"
+    )
+
+    # ----------------------------------------------
+    # ANIMATION UPDATE
+    # ----------------------------------------------
 
     def update(frame):
-        d = dates[frame]
-        sr = sunrise[frame]
-        ss = sunset[frame]
-        dl = daylight[frame]
 
-        new_highlight = build_day_segments(frame, sr, ss, alpha=0.95, width=3.0)
-        highlight.set_segments(new_highlight.get_segments())
-        highlight.set_colors(new_highlight.get_colors())
-        highlight.set_linewidths(new_highlight.get_linewidths())
-
-        current_line.set_xdata([frame, frame])
-
-        info_text.set_text(
-            f"{d.strftime('%d %b %Y')}  ·  "
-            f"Sunrise {hours_to_hm(sr)}  ·  "
-            f"Sunset {hours_to_hm(ss)}  ·  "
-            f"Daylight {daylight_text(dl)}"
+        segments, colors = day_segments(
+            frame,
+            sunrise[frame],
+            sunset[frame]
         )
 
-        return highlight, info_text, current_line
+        highlight.set_segments(
+            segments
+        )
 
-    anim = FuncAnimation(
+        highlight.set_color(
+            colors
+        )
+
+        guide.set_xdata(
+            [frame, frame]
+        )
+
+        date = dates[frame]
+
+        info_text.set_text(
+            f"{date.strftime('%d %b')}   ·   "
+            f"Sunrise {format_time(sunrise[frame])}   ·   "
+            f"Sunset {format_time(sunset[frame])}   ·   "
+            f"Daylight {format_duration(daylight[frame])}"
+        )
+
+        return (
+            highlight,
+            guide,
+            info_text
+        )
+
+    # ----------------------------------------------
+    # CREATE ANIMATION
+    # ----------------------------------------------
+
+    animation = FuncAnimation(
         fig,
         update,
         frames=len(dates),
-        interval=INTERVAL,
-        blit=False,
+        interval=55,
+        blit=True,
         repeat=True
     )
 
-    anim.save(OUTPUT_FILE, writer=PillowWriter(fps=FPS))
-    print(f"Saved animation to: {OUTPUT_FILE}")
+    # ----------------------------------------------
+    # SAVE
+    # ----------------------------------------------
 
-    plt.show()
+    OUTPUT_FILE.parent.mkdir(
+        exist_ok=True
+    )
+
+    print(
+        f"Rendering {len(dates)} frames..."
+    )
+
+    def show_progress(
+        current_frame,
+        total_frames
+    ):
+
+        # print every ~25 frames
+        if (
+            current_frame % 25 == 0
+            or current_frame + 1 == total_frames
+        ):
+
+            print(
+                f"Rendering "
+                f"{current_frame + 1} / "
+                f"{total_frames}"
+            )
+
+    animation.save(
+        OUTPUT_FILE,
+        writer=PillowWriter(
+            fps=FPS
+        ),
+        dpi=90,
+        progress_callback=show_progress
+    )
+
+    print()
+    print(
+        "Finished!"
+    )
+
+    print(
+        f"Saved to: {OUTPUT_FILE}"
+    )
 
 
 if __name__ == "__main__":
