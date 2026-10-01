@@ -14,194 +14,264 @@ from matplotlib.colors import LinearSegmentedColormap, to_rgba
 
 ROOT = Path(__file__).parent
 DATA_FILE = ROOT / "data" / "Sun_rise_set_2026.csv"
-OUTPUT_FILE = ROOT / "out" / "06-sky-gradient-year.png"
+OUTPUT_FILE = ROOT / "out" / "07-final-year-of-light.png"
 
 
 def time_to_hours(time_string):
-    """Convert '07:03' to decimal hours."""
+    """Convert '07:03' into decimal hours."""
     hour, minute = map(int, time_string.split(":"))
     return hour + minute / 60
 
 
 def load_data(path):
+    """Read sunrise and sunset data from the HKO CSV."""
     dates = []
     sunrise = []
     sunset = []
 
     with path.open(encoding="utf-8-sig", newline="") as file:
         reader = csv.DictReader(file)
+
         for row in reader:
-            dates.append(datetime.strptime(row["YYYY-MM-DD"], "%Y-%m-%d"))
+            dates.append(
+                datetime.strptime(row["YYYY-MM-DD"], "%Y-%m-%d")
+            )
             sunrise.append(time_to_hours(row["RISE"]))
             sunset.append(time_to_hours(row["SET"]))
 
     return dates, sunrise, sunset
 
 
-def build_sky_cmap():
+def build_sky_colormap():
     """
-    A soft sky palette for one day:
-    sunrise pink -> warm peach -> soft gold -> pale sky -> warm light -> sunset rose
+    Artistic sky palette from sunrise to sunset.
+
+    These colours are not measured sky-colour data.
+    They are used as an artistic mapping to suggest
+    changing daylight through one day.
     """
     colors = [
-        "#E8AEA3",  # soft rose
-        "#F0C29F",  # peach
-        "#F5D9A6",  # pale gold
-        "#E8E6D8",  # hazy daylight
-        "#D8E1E4",  # pale sky blue-grey
-        "#EEE0BE",  # warm afternoon light
-        "#EDC2A7",  # peach again
-        "#DCA4A6",  # dusty sunset rose
+        "#E9B1A5",  # soft sunrise rose
+        "#F0C4A4",  # pale peach
+        "#F3D9AE",  # warm morning light
+        "#EAE8DA",  # hazy daylight
+        "#D9E2E5",  # pale sky blue-grey
+        "#E8E1C9",  # soft afternoon light
+        "#EDC8AC",  # muted peach
+        "#DFA9A8",  # dusty sunset rose
     ]
-    return LinearSegmentedColormap.from_list("soft_sky", colors)
+
+    return LinearSegmentedColormap.from_list(
+        "soft_sky",
+        colors
+    )
 
 
-def make_gradient_line(ax, x, y0, y1, cmap, n_segments=60, lw=1.2, alpha=0.95):
-    """
-    Draw one vertical line from y0 to y1 using many short segments,
-    so the line itself can have a vertical gradient.
-    """
-    ys = [y0 + (y1 - y0) * i / n_segments for i in range(n_segments + 1)]
+def draw_gradient_day(
+    ax,
+    x,
+    sunrise,
+    sunset,
+    cmap,
+    segments=70,
+    linewidth=1.1,
+    alpha=0.90,
+):
+    """Draw one day as a vertical sunrise-to-sunset colour gradient."""
 
-    segments = []
-    colors = []
+    y_values = [
+        sunrise + (sunset - sunrise) * i / segments
+        for i in range(segments + 1)
+    ]
 
-    for i in range(n_segments):
-        segments.append([(x, ys[i]), (x, ys[i + 1])])
-        t = i / max(1, n_segments - 1)
-        colors.append(to_rgba(cmap(t), alpha=alpha))
+    line_segments = []
+    line_colors = []
 
-    lc = LineCollection(segments, colors=colors, linewidths=lw, capstyle="butt")
-    ax.add_collection(lc)
+    for i in range(segments):
+        line_segments.append(
+            [
+                (x, y_values[i]),
+                (x, y_values[i + 1])
+            ]
+        )
+
+        progress = i / max(1, segments - 1)
+
+        line_colors.append(
+            to_rgba(
+                cmap(progress),
+                alpha=alpha
+            )
+        )
+
+    collection = LineCollection(
+        line_segments,
+        colors=line_colors,
+        linewidths=linewidth,
+        capstyle="butt"
+    )
+
+    ax.add_collection(collection)
 
 
 def main():
     dates, sunrise, sunset = load_data(DATA_FILE)
-    daylight = [set_time - rise_time for rise_time, set_time in zip(sunrise, sunset)]
 
-    x_values = list(range(len(dates)))
-    cmap = build_sky_cmap()
+    background = "#F5F1E8"
+    text = "#2D2926"
+    secondary = "#817A72"
+    grid = "#DCD5C9"
 
-    # ---- figure style ----
-    bg = "#F5F1E8"        # warm paper
-    grid = "#D9D1C5"      # subtle grid
-    text = "#2A2725"      # dark text
-    subtext = "#7E776E"   # muted text
+    cmap = build_sky_colormap()
 
-    fig = plt.figure(figsize=(20, 6.8), dpi=200, facecolor=bg)
-    ax = fig.add_axes([0.05, 0.23, 0.92, 0.58], facecolor=bg)
+    # Wider horizontal format
+    fig = plt.figure(
+        figsize=(20, 6.5),
+        dpi=200,
+        facecolor=background
+    )
 
-    # ---- draw 365 gradient lines ----
-    for x, y0, y1 in zip(x_values, sunrise, sunset):
-        make_gradient_line(ax, x, y0, y1, cmap, n_segments=60, lw=1.15, alpha=0.95)
+    ax = fig.add_axes(
+        [0.045, 0.18, 0.925, 0.64],
+        facecolor=background
+    )
 
-    # ---- axes ----
-    ax.set_xlim(-2, len(dates) + 1)
-    ax.set_ylim(19.5, 4.5)  # inverted so morning is near top
+    # Draw one line for every day
+    for i in range(len(dates)):
+        draw_gradient_day(
+            ax,
+            i,
+            sunrise[i],
+            sunset[i],
+            cmap,
+            segments=70,
+            linewidth=1.1,
+            alpha=0.90,
+        )
+
+    # -----------------------------
+    # Axes
+    # -----------------------------
+
+    ax.set_xlim(-3, len(dates) + 2)
+    ax.set_ylim(19.5, 4.5)
+
+    y_ticks = [5, 7, 9, 12, 15, 17, 19]
+
+    ax.set_yticks(y_ticks)
+
+    ax.set_yticklabels(
+        [f"{int(t):02d}:00" for t in y_ticks],
+        fontsize=10,
+        color=secondary
+    )
+
+    ax.tick_params(
+        axis="y",
+        length=0,
+        pad=9
+    )
 
     ax.set_xticks([])
-    y_ticks = [5, 7, 9, 12, 15, 17, 19]
-    ax.set_yticks(y_ticks)
-    ax.set_yticklabels([f"{int(t):02d}:00" for t in y_ticks], fontsize=11, color=subtext)
 
-    for spine in ax.spines.values():
-        spine.set_visible(False)
-
-    ax.tick_params(axis="y", length=0)
-
-    # horizontal guide lines
+    # Subtle horizontal guides
     for y in y_ticks:
-        ax.axhline(y, color=grid, lw=0.8, alpha=0.35, zorder=0)
+        ax.axhline(
+            y,
+            color=grid,
+            linewidth=0.7,
+            alpha=0.28,
+            zorder=0
+        )
 
-    # month separators + month labels
+    # -----------------------------
+    # Month labels
+    # -----------------------------
+
     month_starts = []
     month_labels = []
+
     last_month = None
 
-    for i, d in enumerate(dates):
-        if d.month != last_month:
+    for i, date in enumerate(dates):
+        if date.month != last_month:
             month_starts.append(i)
-            month_labels.append(d.strftime("%b").upper())
-            last_month = d.month
+            month_labels.append(date.strftime("%b").upper())
+            last_month = date.month
 
-    for x in month_starts:
-        ax.axvline(x - 0.5, color=grid, lw=0.8, alpha=0.35, zorder=0)
+    for position in month_starts:
+        ax.axvline(
+            position - 0.5,
+            color=grid,
+            linewidth=0.7,
+            alpha=0.28,
+            zorder=0
+        )
 
-    for x, label in zip(month_starts, month_labels):
+    for position, label in zip(month_starts, month_labels):
         ax.text(
-            x,
-            19.9,
+            position,
+            19.82,
             label,
             ha="left",
             va="top",
-            fontsize=11,
-            color=subtext
+            fontsize=10,
+            color=secondary
         )
 
-    # ---- titles ----
+    # Remove frame
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+    # -----------------------------
+    # Title
+    # -----------------------------
+
     fig.text(
-        0.05, 0.91,
-        "HONG KONG SUNRISE / SUNSET",
-        fontsize=28,
+        0.045,
+        0.91,
+        "A YEAR OF LIGHT",
+        fontsize=30,
         fontweight="bold",
         color=text,
-        family="sans-serif"
+        ha="left"
     )
 
     fig.text(
-        0.05, 0.865,
-        "365 days of daylight across 2026",
-        fontsize=14,
-        color=subtext
+        0.045,
+        0.86,
+        "Hong Kong sunrise and sunset · 2026",
+        fontsize=13,
+        color=secondary,
+        ha="left"
     )
+
+    # -----------------------------
+    # Source
+    # -----------------------------
 
     fig.text(
-        0.965, 0.91,
-        "2026",
-        ha="right",
-        fontsize=24,
-        fontweight="bold",
-        color="#D58C67"
+        0.97,
+        0.065,
+        "Source · Hong Kong Observatory",
+        fontsize=9,
+        color=secondary,
+        ha="right"
     )
 
-    # ---- quiet annotation ----
-    longest_idx = daylight.index(max(daylight))
-    shortest_idx = daylight.index(min(daylight))
+    # -----------------------------
+    # Save
+    # -----------------------------
 
-    longest_day = daylight[longest_idx]
-    shortest_day = daylight[shortest_idx]
-
-    def format_duration(hours):
-        total_minutes = round(hours * 60)
-        h = total_minutes // 60
-        m = total_minutes % 60
-        return f"{h}h {m:02d}m"
-
-    fig.text(
-        0.05, 0.11,
-        f"Longest daylight  {dates[longest_idx].strftime('%d %b')}  ·  {format_duration(longest_day)}",
-        fontsize=11,
-        color=subtext
-    )
-
-    fig.text(
-        0.34, 0.11,
-        f"Shortest daylight  {dates[shortest_idx].strftime('%d %b')}  ·  {format_duration(shortest_day)}",
-        fontsize=11,
-        color=subtext
-    )
-
-    fig.text(
-        0.965, 0.11,
-        "Source: Hong Kong Observatory",
-        ha="right",
-        fontsize=10,
-        color=subtext
-    )
-
-    # ---- save ----
     OUTPUT_FILE.parent.mkdir(exist_ok=True)
-    plt.savefig(OUTPUT_FILE, facecolor=bg, bbox_inches="tight")
+
+    plt.savefig(
+        OUTPUT_FILE,
+        dpi=220,
+        facecolor=fig.get_facecolor(),
+        bbox_inches="tight"
+    )
+
     plt.show()
 
 
