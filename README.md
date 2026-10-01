@@ -1,34 +1,62 @@
-# The phenomenon
+# A Year of Light
 
-<!-- This is the SD5913 assignment 2 template. Everything in this file is yours to
-replace, and the check counts words: comments like this one are not words, so
-delete each one as you write. Start with the heading: name the phenomenon.
+**A Year of Light** is a data visualisation of sunrise and sunset times in Hong Kong throughout 2026.
 
-Then, in this order, at least 150 words in total.
+I chose this phenomenon because the change in daylight is difficult to notice from one day to the next, but becomes much clearer when an entire year is viewed together. Instead of using a conventional line chart, I wanted to turn each day into a small visual unit and let the accumulation of 365 days reveal the annual rhythm of daylight.
 
-New to folders, paths, or the files here whose names start with a dot? Read
-https://github.com/sd5913/pfad/blob/2026/reference/files.md first. Ten minutes. -->
+## Data Source
 
-![what the picture is](out/plot.png)
+The data comes from the Hong Kong Observatory (HKO) open data service.
 
-## The phenomenon
+Source:  
+https://data.weather.gov.hk/weatherAPI/opendata/opendata.php?dataType=SRS&year=2026&rformat=csv
 
-<!-- What goes up and down, and why you looked at it. -->
+The original dataset is stored locally as:
 
-## The source
+`data/Sun_rise_set_2026.csv`
 
-<!-- A link to the page or endpoint the file came from, and one line on what is in
-the file: how many rows, what a row means, what the units are. -->
+It contains 365 daily records for the year 2026. Each row includes:
 
-## What the picture shows
+- `YYYY-MM-DD` — date
+- `RISE` — sunrise time
+- `TRAN.` — solar transit time
+- `SET` — sunset time
 
-<!-- Two or three sentences. Including what it hides: every transformation throws
-something away, and naming what yours threw away is the easiest way to sound like
-you know what you did. -->
+The time values are provided in hours and minutes.
 
-## Run it
+## Visualisation
 
-```
-uv run fetch.py
+![A Year of Light](out/07-final-year-of-light.png)
+
+Each vertical line represents one day.
+
+The horizontal position shows the date across the year. The upper end of each line represents sunrise, while the lower end represents sunset. Because of this, the length of the line directly represents the amount of daylight on that day.
+
+When all 365 days are placed next to each other, the gradual seasonal expansion and contraction of daylight becomes visible as a continuous shape.
+
+A soft colour gradient is used within each daily line, moving from warm sunrise tones through pale daylight colours and back towards warmer sunset tones. These colours are an artistic interpretation of the changing atmosphere of daylight. They are not measurements of the actual colour of the sky.
+
+## Animation
+
+The project also includes a small animated version of the visualisation.
+
+![Animated A Year of Light](out/08-year-of-light-daily-info.gif)
+
+The full year remains visible in the background while one day is highlighted at a time. The highlighted day displays its date, sunrise time, sunset time, and total daylight duration.
+
+The animation does not introduce new data. Instead, it makes it easier to read individual daily values while keeping them within the context of the full year.
+
+## What the Visualisation Shows and Hides
+
+The visualisation focuses on one relationship: how sunrise, sunset, and daylight duration change across the year.
+
+It deliberately does not show weather conditions, cloud cover, temperature, brightness, or the actual observed colour of the sky. Although the original dataset also contains solar transit time, this value is not visualised in the final image.
+
+This simplification allows the visualisation to keep one clear message: small daily changes accumulate into a visible annual rhythm of light.
+
+## Run
+
+Generate the static visualisation:
+
+```bash
 uv run plot.py
-```
