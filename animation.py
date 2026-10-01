@@ -19,7 +19,7 @@ from matplotlib.colors import LinearSegmentedColormap
 
 ROOT = Path(__file__).parent
 DATA_FILE = ROOT / "data" / "Sun_rise_set_2026.csv"
-OUTPUT_FILE = ROOT / "out" / "07-year-of-light-animation.gif"
+OUTPUT_FILE = ROOT / "out" / "08-year-of-light-daily-info.gif"
 
 
 # --------------------------------------------------
@@ -31,23 +31,18 @@ TEXT = "#2D2926"
 SECONDARY = "#817A72"
 GRID = "#DCD5C9"
 
-# Background lines
 BASE_ALPHA = 0.42
 BASE_WIDTH = 1.0
 
-# Current day
 HIGHLIGHT_ALPHA = 1.0
 HIGHLIGHT_WIDTH = 3.0
 
-# Each day is divided into this many colour sections.
-# 24 is enough for a smooth-looking gradient but much faster than 60.
 SEGMENTS_PER_DAY = 24
-
 FPS = 18
 
 
 # --------------------------------------------------
-# DATA
+# DATA HELPERS
 # --------------------------------------------------
 
 def time_to_hours(time_string):
@@ -57,7 +52,7 @@ def time_to_hours(time_string):
 
 
 def format_time(hours):
-    """Convert decimal hours back to HH:MM."""
+    """Convert decimal hours to HH:MM."""
     total_minutes = round(hours * 60)
 
     hour = total_minutes // 60
@@ -67,7 +62,7 @@ def format_time(hours):
 
 
 def format_duration(hours):
-    """Convert decimal hours into 13h 30m."""
+    """Convert decimal hours to 13h 30m."""
     total_minutes = round(hours * 60)
 
     hour = total_minutes // 60
@@ -77,6 +72,7 @@ def format_duration(hours):
 
 
 def load_data(path):
+    """Read HKO sunrise and sunset data."""
     dates = []
     sunrise = []
     sunset = []
@@ -104,12 +100,12 @@ def load_data(path):
 
 
 # --------------------------------------------------
-# SKY COLOURS
+# SKY COLOUR PALETTE
 # --------------------------------------------------
 
 def build_sky_colormap():
     """
-    Artistic sky colours from sunrise to sunset.
+    Artistic sky gradient from sunrise to sunset.
 
     These colours are not measured sky-colour data.
     They visually suggest the changing atmosphere of daylight.
@@ -141,7 +137,7 @@ SKY_CMAP = build_sky_colormap()
 
 def day_segments(x, sunrise, sunset):
     """
-    Return segments and colours for one vertical day.
+    Create coloured line segments for one day.
     """
 
     segments = []
@@ -174,7 +170,7 @@ def day_segments(x, sunrise, sunset):
 
 
 # --------------------------------------------------
-# BUILD ALL 365 DAYS ONCE
+# BUILD STATIC YEAR
 # --------------------------------------------------
 
 def build_year_background(
@@ -219,8 +215,6 @@ def main():
     # FIGURE
     # ----------------------------------------------
 
-    # Keep the wide composition,
-    # but GIF resolution is intentionally lighter.
     fig = plt.figure(
         figsize=(16, 5.2),
         dpi=100,
@@ -233,7 +227,7 @@ def main():
     )
 
     # ----------------------------------------------
-    # STATIC YEAR
+    # STATIC BACKGROUND
     # ----------------------------------------------
 
     background_segments, background_colors = (
@@ -258,7 +252,7 @@ def main():
     )
 
     # ----------------------------------------------
-    # CURRENT-DAY HIGHLIGHT
+    # CURRENT DAY HIGHLIGHT
     # ----------------------------------------------
 
     initial_segments, initial_colors = day_segments(
@@ -276,15 +270,38 @@ def main():
         zorder=5
     )
 
-    ax.add_collection(highlight)
+    ax.add_collection(
+        highlight
+    )
 
-    # A very subtle vertical guide
+    # subtle vertical guide
     guide = ax.axvline(
         0,
         color="#B8AEA3",
         linewidth=0.7,
         alpha=0.35,
         zorder=1
+    )
+
+    # ----------------------------------------------
+    # MOVING DAILY INFO LABEL
+    # ----------------------------------------------
+
+    info_text = ax.text(
+        0,
+        0,
+        "",
+        fontsize=8.5,
+        color=TEXT,
+        ha="left",
+        va="bottom",
+        zorder=10,
+        bbox=dict(
+            boxstyle="round,pad=0.32",
+            facecolor=BACKGROUND,
+            edgecolor="none",
+            alpha=0.92
+        )
     )
 
     # ----------------------------------------------
@@ -311,7 +328,9 @@ def main():
         19
     ]
 
-    ax.set_yticks(y_ticks)
+    ax.set_yticks(
+        y_ticks
+    )
 
     ax.set_yticklabels(
         [
@@ -329,7 +348,7 @@ def main():
     )
 
     # ----------------------------------------------
-    # MONTHS
+    # MONTH LABELS
     # ----------------------------------------------
 
     month_positions = []
@@ -342,6 +361,7 @@ def main():
         if date.month != last_month:
 
             month_positions.append(i)
+
             month_labels.append(
                 date.strftime("%b").upper()
             )
@@ -392,7 +412,7 @@ def main():
         spine.set_visible(False)
 
     # ----------------------------------------------
-    # TITLE — SAME AS STATIC VERSION
+    # TITLE
     # ----------------------------------------------
 
     fig.text(
@@ -415,17 +435,8 @@ def main():
     )
 
     # ----------------------------------------------
-    # CURRENT DAY INFORMATION
+    # SOURCE
     # ----------------------------------------------
-
-    info_text = fig.text(
-        0.045,
-        0.085,
-        "",
-        fontsize=10,
-        color=TEXT,
-        ha="left"
-    )
 
     fig.text(
         0.97,
@@ -462,11 +473,35 @@ def main():
 
         date = dates[frame]
 
+        # update label text
         info_text.set_text(
-            f"{date.strftime('%d %b')}   ·   "
-            f"Sunrise {format_time(sunrise[frame])}   ·   "
-            f"Sunset {format_time(sunset[frame])}   ·   "
+            f"{date.strftime('%d %b')}  ·  "
+            f"Sunrise {format_time(sunrise[frame])}  ·  "
+            f"Sunset {format_time(sunset[frame])}  ·  "
             f"Daylight {format_duration(daylight[frame])}"
+        )
+
+        # ------------------------------------------
+        # Move the label beside highlighted day
+        # ------------------------------------------
+
+        # most of the year: place text on the right
+        label_x = frame + 4
+        info_text.set_ha("left")
+
+        # near the right edge: move text to the left
+        if frame > len(dates) - 80:
+            label_x = frame - 4
+            info_text.set_ha("right")
+
+        # place label just above sunrise
+        label_y = sunrise[frame] - 0.35
+
+        info_text.set_position(
+            (
+                label_x,
+                label_y
+            )
         )
 
         return (
@@ -505,7 +540,6 @@ def main():
         total_frames
     ):
 
-        # print every ~25 frames
         if (
             current_frame % 25 == 0
             or current_frame + 1 == total_frames
@@ -527,9 +561,7 @@ def main():
     )
 
     print()
-    print(
-        "Finished!"
-    )
+    print("Finished!")
 
     print(
         f"Saved to: {OUTPUT_FILE}"
